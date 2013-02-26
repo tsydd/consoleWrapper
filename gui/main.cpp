@@ -3,6 +3,7 @@
 
 #include "console.h"
 #include "logWindow.h"
+#include "util.h"
 
 #include <windows.h>
 #include <stdlib.h>
@@ -10,8 +11,12 @@
 #include <tchar.h>
 #include <Richedit.h>
 
+#define BUFSIZE 4096 
 
 // Global variables
+
+CConsole console;
+HANDLE g_hReaderThreadHandle;
 
 // The main window class name.
 static TCHAR szWindowClass[] = _T("win32app");
@@ -27,6 +32,8 @@ LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 HWND CreateRichEdit(HWND hwndOwner, int x, int y, int width, int height, HINSTANCE hinst);
 
 HWND mainWindow;
+
+void startConsole(void);
 
 int WINAPI WinMain(HINSTANCE hInstance,
                    HINSTANCE hPrevInstance,
@@ -146,7 +153,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			if (!createStruct->hwndParent) {
 				CreateRichEdit(hWnd, 0, 0, 800, 600, hInst);		
 			} else {
-				hwndEdit = createLogTextArea(hWnd, hInst);				
+				hwndEdit = createLogTextArea(hWnd, hInst);
+				startConsole();
 			}
 
 			break;
@@ -154,6 +162,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_DESTROY:		
 		if (hWnd == mainWindow) {
 			PostQuitMessage(0);
+			TerminateThread(g_hReaderThreadHandle, 0);
 		}
         break;
 	case WM_SIZE:
@@ -187,4 +196,48 @@ HWND CreateRichEdit(HWND hwndOwner,        // Dialog box handle.
         hwndOwner, NULL, hinst, NULL);
         
     return hwndEdit;
+}
+
+void startConsole()
+{	
+	console.Start();
+	DWORD returnCode;
+	g_hReaderThreadHandle = CreateThread( 
+		NULL,                   // default security attributes
+		0,                      // use default stack size  
+		consoleReaderThreadFunction,       // thread function name
+		NULL,          // argument to thread function 
+		0,                      // use default creation flags 
+		&returnCode);   // returns the thread identifier 
+
+	if (g_hReaderThreadHandle == NULL) 
+	{
+		ErrorExit(TEXT("CreateThread"));
+		ExitProcess(3);
+	}
+}
+
+DWORD WINAPI consoleReaderThreadFunction(LPVOID params)
+{
+	DWORD dwRead, dwWritten; 
+	CHAR chBuf[BUFSIZE];
+	TCHAR lpctBuf[BUFSIZE];
+	
+	BOOL bSuccess = FALSE;
+	HANDLE hParentStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	for (;;) 
+	{ 
+		bSuccess = ReadFile( console.m_hChildStd_OUT_Rd, chBuf, BUFSIZE, &dwRead, NULL);
+		if( ! bSuccess || dwRead == 0 ) break; 
+		
+#ifdef UNICODE
+		size_t convertedSize;
+		mbstowcs_s(&convertedSize, lpctBuf, chBuf, dwRead);
+#else
+		lpctBuf = chBuf;
+#endif
+		appendLogText(lpctBuf);
+	} 
+
+	return 0;
 }
